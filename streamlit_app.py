@@ -1,6 +1,63 @@
 import streamlit as st
 from datetime import date, datetime
 
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    GSPREAD_OK = True
+except ImportError:
+    GSPREAD_OK = False
+
+
+# ---------- logging para Google Sheets ----------
+
+LOG_COLUMNS = [
+    "timestamp", "timestamp_fim",
+    "hospital", "numero_atendimento", "peso_kg", "idade_anos", "sexo_feminino",
+    "gravida", "idade_gestacional_semanas",
+    "contraste_iodado", "carater", "jejum_4h",
+    "alergia_contraste_iodo", "hipertireoidismo_ativo", "alergia_historico",
+    "quimioterapia_atual", "qt_data", "qt_dias_ate_hoje",
+    "hemodialise", "nefro_acordado",
+    "dm2", "metformina", "has", "rim_unico_ferradura",
+    "creatinina_data", "creatinina_mg_dl", "tfg",
+    "q12b_beneficios_maiores", "q12c_imprescindivel", "cuidados_pos_contraste",
+    "tipo_exame", "volume_contraste_ml",
+    "conduta_final",
+]
+
+
+@st.cache_resource
+def _get_worksheet():
+    if not GSPREAD_OK:
+        return None
+    try:
+        creds_info = dict(st.secrets["gcp_service_account"])
+        sheet_id = st.secrets["sheet_id"]
+    except Exception:
+        return None
+    try:
+        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+        creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+        client = gspread.authorize(creds)
+        return client.open_by_key(sheet_id).sheet1
+    except Exception:
+        return None
+
+
+def log_para_sheets(respostas: dict) -> bool:
+    ws = _get_worksheet()
+    if ws is None:
+        return False
+    try:
+        if not ws.row_values(1):
+            ws.append_row(LOG_COLUMNS, value_input_option="USER_ENTERED")
+        linha = [str(respostas.get(c, "")) for c in LOG_COLUMNS]
+        ws.append_row(linha, value_input_option="USER_ENTERED")
+        return True
+    except Exception:
+        return False
+
 
 # ---------- helpers ----------
 
@@ -39,10 +96,12 @@ def goto(novo_step: str):
 def encerrar(conduta: str, mensagens):
     st.session_state.conduta_final = conduta
     st.session_state.respostas["conduta_final"] = conduta
+    st.session_state.respostas["timestamp_fim"] = datetime.now().isoformat(timespec="seconds")
     if isinstance(mensagens, str):
         st.session_state.mensagens_finais = [mensagens]
     else:
         st.session_state.mensagens_finais = list(mensagens)
+    st.session_state.log_ok = log_para_sheets(st.session_state.respostas)
     st.session_state.step = "fim"
     st.rerun()
 
@@ -69,8 +128,10 @@ st.title("TC - apoio e orientações a prescrição de contraste iodado")
 
 with st.sidebar:
     st.header("Resumo")
-    if R.get("id_solicitacao") is not None:
-        st.write(f"**ID solicitação:** {R['id_solicitacao']}")
+    if R.get("hospital"):
+        st.write(f"**Hospital:** {R['hospital']}")
+    if R.get("numero_atendimento") is not None:
+        st.write(f"**Atendimento:** {R['numero_atendimento']}")
     if R.get("peso_kg"):
         st.write(f"**Peso:** {R['peso_kg']} kg")
     if R.get("idade_anos") is not None:
@@ -89,7 +150,12 @@ with st.sidebar:
 if step == "dados_basicos":
     st.subheader("Dados do paciente")
     with st.form("f_dados"):
-        id_sol_str = st.text_input("ID da solicitação de TC", value="")
+        hospital = st.radio(
+            "Selecione o seu hospital:",
+            ["HMB", "HCN", "HEF", "HETrin"],
+            horizontal=True,
+        )
+        num_atend_str = st.text_input("Numero de Atendimento", value="")
         peso_str = st.text_input("Peso do paciente (kg)", value="")
         idade_str = st.text_input("Idade do paciente (anos)", value="")
         sexo = st.radio(
@@ -98,11 +164,11 @@ if step == "dados_basicos":
         )
         if st.form_submit_button("Prosseguir", type="primary"):
             try:
-                id_sol = int(id_sol_str.strip())
+                num_atend = int(num_atend_str.strip())
                 peso = float(peso_str.replace(",", ".").strip())
                 idade = int(idade_str.strip())
             except ValueError:
-                st.error("Preencha ID, peso e idade com valores numéricos válidos.")
+                st.error("Preencha Atendimento, peso e idade com valores numéricos válidos.")
                 st.stop()
             if peso <= 0 or peso > 400:
                 st.error("Peso deve estar entre 0,1 e 400 kg.")
@@ -110,7 +176,8 @@ if step == "dados_basicos":
             if idade < 0 or idade > 120:
                 st.error("Idade deve estar entre 0 e 120 anos.")
                 st.stop()
-            R["id_solicitacao"] = id_sol
+            R["hospital"] = hospital
+            R["numero_atendimento"] = num_atend
             R["peso_kg"] = peso
             R["idade_anos"] = idade
             R["sexo_feminino"] = sexo == "Sim"
@@ -516,6 +583,8 @@ elif step == "fim":
         "Obrigado por suas respostas. Se dúvidas, entre em contato com a Diretoria "
         "Médica. Até breve!"
     )
+    if st.session_state.get("log_ok"):
+        st.caption("✓ Registro salvo")
     if st.button("Nova Consulta", type="primary"):
         reiniciar()
 
