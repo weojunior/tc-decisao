@@ -50,10 +50,14 @@ def log_para_sheets(respostas: dict) -> bool:
     if ws is None:
         return False
     try:
-        if not ws.row_values(1):
-            ws.append_row(LOG_COLUMNS, value_input_option="USER_ENTERED")
+        if ws.row_values(1) != LOG_COLUMNS:
+            ws.update("A1", [LOG_COLUMNS])
         linha = [str(respostas.get(c, "")) for c in LOG_COLUMNS]
-        ws.append_row(linha, value_input_option="USER_ENTERED")
+        ws.append_row(
+            linha,
+            value_input_option="USER_ENTERED",
+            table_range="A1",
+        )
         return True
     except Exception:
         return False
@@ -123,6 +127,22 @@ st.set_page_config(
 init_state()
 R = st.session_state.respostas
 step = st.session_state.step
+
+st.markdown(
+    """
+    <style>
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stWidgetLabel"] label {
+        font-size: 1.2rem !important;
+        font-weight: 500 !important;
+    }
+    .stRadio div[role="radiogroup"] label p {
+        font-size: 1.1rem !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 st.title("TC - apoio e orientações a prescrição de contraste iodado")
 
